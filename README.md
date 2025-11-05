@@ -137,6 +137,92 @@ python main.py
 
 The bot should now be running and will send standup messages at the configured time.
 
+## Deployment to Heroku
+
+### Prerequisites
+
+- A Heroku account (sign up at [heroku.com](https://www.heroku.com))
+- Heroku CLI installed ([install instructions](https://devcenter.heroku.com/articles/heroku-cli))
+- Git repository initialized
+
+### Deployment Steps
+
+1. **Install Heroku CLI** (if not already installed):
+   ```bash
+   # macOS
+   brew tap heroku/brew && brew install heroku
+   
+   # Or download from https://devcenter.heroku.com/articles/heroku-cli
+   ```
+
+2. **Login to Heroku**:
+   ```bash
+   heroku login
+   ```
+
+3. **Create a Heroku App**:
+   ```bash
+   heroku create your-bot-name
+   ```
+
+4. **Set Environment Variables**:
+   ```bash
+   heroku config:set DISCORD_BOT_TOKEN=your_bot_token
+   heroku config:set DISCORD_CHANNEL_ID=your_channel_id
+   heroku config:set TIMEZONE=America/New_York
+   heroku config:set STANDUP_HOUR=17
+   heroku config:set STANDUP_MINUTE=0
+   heroku config:set USE_OPENAI=false
+   # If using OpenAI:
+   # heroku config:set USE_OPENAI=true
+   # heroku config:set OPENAI_API_KEY=your_openai_key
+   ```
+
+5. **Deploy to Heroku**:
+   ```bash
+   git add .
+   git commit -m "Initial commit"
+   git push heroku main
+   ```
+
+6. **Scale the Worker Dyno**:
+   ```bash
+   heroku ps:scale worker=1
+   ```
+
+7. **View Logs**:
+   ```bash
+   heroku logs --tail
+   ```
+
+### Important Notes for Heroku
+
+- **Database Persistence**: Heroku's filesystem is ephemeral. The SQLite database will be reset on each dyno restart. For production, consider:
+  - Using Heroku Postgres (free tier available) and modifying the database layer
+  - Using a persistent storage addon like Bucketeer
+  - For now, the bot will work but data may be lost on restarts
+  
+- **Dyno Types**: 
+  - Use **Standard** or **Eco** dyno (Eco dynos sleep after 30 minutes of inactivity, which is fine for a bot that runs scheduled tasks)
+  - Standard 1X dyno: $25/month (recommended for 24/7 uptime)
+  - Eco dyno: $5/month (sleeps when inactive, but scheduled tasks wake it up)
+
+- **Monitoring**: 
+  - Check `heroku logs --tail` regularly
+  - Set up Heroku alerts for errors
+  - Monitor dyno hours usage
+
+### Updating the Bot
+
+After making changes:
+```bash
+git add .
+git commit -m "Your commit message"
+git push heroku main
+```
+
+The bot will automatically restart with the new code.
+
 ## Usage
 
 ### Slash Commands
