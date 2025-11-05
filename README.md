@@ -116,9 +116,16 @@ This will:
    # OpenAI API Configuration (optional)
    USE_OPENAI=false
    OPENAI_API_KEY=your_openai_key_if_using
+   
+   # Google Sheets Integration (optional, for task management)
+   SPREADSHEET_ID=your_spreadsheet_id_here
+   GOOGLE_CREDENTIALS_PATH=credentials.json
+   GOOGLE_SHEETS_HEADER_ROW=6
    ```
 
    Replace `your_actual_bot_token` with your Discord bot token and `your_channel_id` with your Discord channel ID.
+   
+   **For Google Sheets integration:** See [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md) for detailed setup instructions.
 
 ### 7. Run the Bot
 
@@ -176,6 +183,24 @@ The bot should now be running and will send standup messages at the configured t
    # If using OpenAI:
    # heroku config:set USE_OPENAI=true
    # heroku config:set OPENAI_API_KEY=your_openai_key
+   
+   # If using Google Sheets integration:
+   # heroku config:set SPREADSHEET_ID=your_spreadsheet_id
+   # heroku config:set GOOGLE_SHEETS_HEADER_ROW=6
+   # Note: You'll need to upload credentials.json separately (see below)
+   ```
+   
+   **Important:** For Google Sheets integration, you'll need to upload your `credentials.json` file to Heroku:
+   ```bash
+   # Upload credentials.json to Heroku (one-time setup)
+   # Option 1: Use Heroku Config Vars (recommended for production)
+   # Store the JSON content as a config var and write it to the file at runtime
+   
+   # Option 2: Add credentials.json to a secure location
+   # You can use Heroku Scheduler or a buildpack to manage this
+   
+   # For now, the simplest approach is to encode the JSON as base64
+   # and store it in a config var, then decode it at runtime
    ```
 
 5. **Deploy to Heroku**:
@@ -197,10 +222,18 @@ The bot should now be running and will send standup messages at the configured t
 
 ### Important Notes for Heroku
 
+- **Procfile**: The `Procfile` uses `uv run python main.py` to ensure dependencies are properly installed. Make sure `uv` is available in your Heroku environment (it should be installed via `pyproject.toml`).
+
 - **Database Persistence**: Heroku's filesystem is ephemeral. The SQLite database will be reset on each dyno restart. For production, consider:
   - Using Heroku Postgres (free tier available) and modifying the database layer
   - Using a persistent storage addon like Bucketeer
   - For now, the bot will work but data may be lost on restarts
+  
+- **Google Sheets Credentials**: If using Google Sheets integration:
+  - The `credentials.json` file needs to be available on Heroku
+  - Store it securely (e.g., as a base64-encoded config var, or use Heroku Scheduler)
+  - Ensure the service account email has access to your spreadsheet
+  - Set `GOOGLE_CREDENTIALS_PATH` if the file is in a non-standard location
   
 - **Dyno Types**: 
   - Use **Standard** or **Eco** dyno (Eco dynos sleep after 30 minutes of inactivity, which is fine for a bot that runs scheduled tasks)
@@ -211,6 +244,7 @@ The bot should now be running and will send standup messages at the configured t
   - Check `heroku logs --tail` regularly
   - Set up Heroku alerts for errors
   - Monitor dyno hours usage
+  - Watch for API rate limits (Discord and Google Sheets APIs)
 
 ### Updating the Bot
 
@@ -237,6 +271,15 @@ The bot supports the following slash commands:
 - `/schedule_test_standup <minutes>` - Schedule a test standup message X minutes from now (for testing)
 - `/test_follow_ups` - Test follow-up messages for commitments (simulates next day)
 
+### Task Management Commands (Google Sheets Integration)
+
+- `/add_task` - Add a new task via interactive form (opens modal)
+- `/view_tasks [user]` - View all tasks, or filter by assigned user
+- `/my_tasks` - Show tasks assigned to you
+- `/complete_task <number> <outcome>` - Mark a task as complete with an outcome
+
+**Note:** Task management commands require Google Sheets integration. See [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md) for setup instructions.
+
 ### How It Works
 
 1. **Daily Standup**: At the configured time (default 5:00 PM), the bot sends a message asking:
@@ -255,18 +298,23 @@ The bot supports the following slash commands:
 
 ```
 daily-standup-discord-bot/
-├── main.py              # Bot initialization and event handlers
-├── scheduler.py         # Scheduling logic for daily messages
-├── message_parser.py    # Parse and extract commitments from messages
-├── database.py          # SQLite database storage layer
-├── pyproject.toml       # Project dependencies and metadata (for uv)
-├── uv.lock              # Lock file for reproducible builds (created by uv)
-├── requirements.txt     # Python dependencies (backup, pyproject.toml is primary)
-├── .env                 # Environment variables (create this yourself)
-├── .venv/               # Virtual environment (created automatically by uv)
-├── standup_bot.db       # SQLite database (created automatically)
-├── bot.log              # Bot log file
-└── README.md            # This file
+├── main.py                 # Bot initialization and event handlers
+├── scheduler.py            # Scheduling logic for daily messages
+├── message_parser.py      # Parse and extract commitments from messages
+├── database.py            # SQLite database storage layer
+├── sheets_manager.py      # Google Sheets integration module
+├── pyproject.toml         # Project dependencies and metadata (for uv)
+├── uv.lock                # Lock file for reproducible builds (created by uv)
+├── requirements.txt       # Python dependencies (backup, pyproject.toml is primary)
+├── Procfile               # Heroku process file (for deployment)
+├── runtime.txt            # Python version specification (for Heroku)
+├── .env                   # Environment variables (create this yourself, not in repo)
+├── .venv/                 # Virtual environment (created automatically by uv)
+├── standup_bot.db         # SQLite database (created automatically)
+├── bot.log                # Bot log file (created automatically)
+├── credentials.json       # Google service account credentials (not in repo, see setup)
+├── GOOGLE_SHEETS_SETUP.md # Google Sheets setup instructions
+└── README.md              # This file
 ```
 
 ## Configuration
@@ -280,6 +328,9 @@ daily-standup-discord-bot/
 - `TIMEZONE` (optional): Timezone for scheduling (default: UTC). Use IANA timezone names like 'America/New_York', 'Europe/London', etc.
 - `USE_OPENAI` (optional): Enable OpenAI parsing (true/false, default: false)
 - `OPENAI_API_KEY` (optional): OpenAI API key if using OpenAI parsing
+- `SPREADSHEET_ID` (optional): Google Spreadsheet ID for task management (see [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md))
+- `GOOGLE_CREDENTIALS_PATH` (optional): Path to Google service account credentials JSON file (default: `credentials.json`)
+- `GOOGLE_SHEETS_HEADER_ROW` (optional): Row number where headers are located (default: 6)
 
 ### Message Parsing
 
@@ -336,6 +387,48 @@ The bot logs to both:
 
 Log levels include INFO, WARNING, and ERROR messages.
 
+## Code Quality
+
+The codebase follows best practices:
+- **Type hints**: Used throughout for better code clarity
+- **Comprehensive logging**: All operations are logged for debugging
+- **Error handling**: Try-except blocks with proper error messages
+- **Documentation**: Inline comments and docstrings for all functions
+- **Modular design**: Separated concerns (database, scheduler, parser, sheets manager)
+- **Environment-based configuration**: All sensitive data via environment variables
+
+## Production Readiness
+
+### Before Deploying to Production
+
+1. **Security**:
+   - Never commit `.env` or `credentials.json` to version control
+   - Use environment variables for all sensitive data
+   - Review and set appropriate Discord bot permissions
+   - Rotate credentials regularly
+
+2. **Database**:
+   - Consider migrating from SQLite to PostgreSQL for production
+   - Set up database backups
+   - Monitor database size and performance
+
+3. **Monitoring**:
+   - Set up error tracking (e.g., Sentry)
+   - Monitor API rate limits
+   - Track bot uptime and response times
+   - Set up alerts for critical errors
+
+4. **Testing**:
+   - Test all slash commands before deployment
+   - Verify scheduled messages work correctly
+   - Test Google Sheets integration (if used)
+   - Verify timezone handling
+
+5. **Documentation**:
+   - Document your specific configuration
+   - Keep team members informed of bot capabilities
+   - Maintain a changelog for updates
+
 ## License
 
 This project is open source and available for use.
@@ -349,4 +442,5 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 For issues or questions:
 1. Check the troubleshooting section above
 2. Review the bot logs for error messages
-3. Open an issue on the project repository
+3. Check the [Google Sheets Setup Guide](GOOGLE_SHEETS_SETUP.md) if using task management
+4. Open an issue on the project repository

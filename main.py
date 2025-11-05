@@ -1,10 +1,18 @@
 """
 Main Discord bot module for daily standups.
 
-Handles:
-- Bot initialization and event handlers
+This module handles:
+- Bot initialization and Discord event handlers
 - Message monitoring for standup responses
-- Slash commands for configuration
+- Slash commands for configuration and task management
+- Google Sheets integration for task tracking
+- Response tracking and commitment extraction
+
+The bot automatically:
+- Sends daily standup messages at a configured time
+- Tracks user responses and extracts commitments
+- Sends follow-up messages to check on commitments
+- Manages tasks via Google Sheets integration
 """
 
 import os
@@ -19,6 +27,7 @@ from dotenv import load_dotenv
 from database import Database
 from message_parser import MessageParser
 from scheduler import StandupScheduler
+from sheets_manager import GoogleSheetsManager
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +48,7 @@ BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 USE_OPENAI = os.getenv('USE_OPENAI', 'false').lower() == 'true'
+SPREADSHEET_ID = os.getenv('SPREADSHEET_ID', '')
 
 # Response tracking window (hours after standup message)
 RESPONSE_WINDOW_HOURS = 3
@@ -79,6 +89,25 @@ class StandupBot(commands.Bot):
         # Track last standup message time
         self.last_standup_time: Optional[datetime] = None
         self.standup_message_id: Optional[int] = None
+        
+        # Initialize Google Sheets Manager if configured
+        self.sheets_manager: Optional[GoogleSheetsManager] = None
+        if SPREADSHEET_ID:
+            try:
+                # Get header row from env, default to 6
+                header_row = int(os.getenv('GOOGLE_SHEETS_HEADER_ROW', '6'))
+                self.sheets_manager = GoogleSheetsManager(
+                    spreadsheet_id=SPREADSHEET_ID,
+                    credentials_path=os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json'),
+                    header_row=header_row
+                )
+                logger.info(f"Google Sheets Manager initialized successfully (headers in row {header_row})")
+            except Exception as e:
+                logger.error(f"Failed to initialize Google Sheets Manager: {e}")
+                logger.error(f"Error details: {type(e).__name__}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                logger.warning("Task management commands will be unavailable")
     
     async def setup_hook(self):
         """Called when the bot is starting up."""
@@ -108,36 +137,51 @@ class StandupBot(commands.Bot):
         logger.info('Bot status set to "Watching daily standups"')
     
     async def on_message(self, message: discord.Message):
-        """Handle incoming messages."""
-        # Ignore messages from bots
+        """
+        Handle incoming messages in the standup channel.
+        
+        This method:
+        1. Filters out bot messages
+        2. Checks if the message is in the standup channel
+        3. Tracks responses within the response window (default 3 hours)
+        4. Processes both replies to standup messages and direct messages in the channel
+        """
+        # Ignore messages from bots (including our own)
         if message.author.bot:
             return
         
-        # Check if message is in the standup channel
+        # Only process messages in the configured standup channel
         if message.channel.id != self.scheduler.channel_id:
             return
         
         # Check if we should track this message (within response window)
+        # This allows users to respond to standup messages within a reasonable time frame
         if self.last_standup_time:
             time_diff = (datetime.now() - self.last_standup_time).total_seconds() / 3600
             if time_diff <= RESPONSE_WINDOW_HOURS:
                 # Check if it's a reply to the standup message
                 if message.reference and message.reference.message_id == self.standup_message_id:
                     await self.process_standup_response(message)
-                # Also check if it's a direct message in the channel (not a reply)
+                # Also process direct messages in the channel (not replies)
+                # This allows users to respond without replying to the original message
                 elif not message.reference:
-                    # Process as standup response if it's a direct message
                     await self.process_standup_response(message)
         
-        # Process the command
+        # Process any commands in the message
         await self.process_commands(message)
     
     async def process_standup_response(self, message: discord.Message):
         """
         Process a user's response to the standup prompt.
         
+        This method:
+        1. Extracts user information from the message
+        2. Parses the message to extract today's work and tomorrow's commitment
+        3. Saves the response to the database
+        4. Sends a confirmation message to the user
+        
         Args:
-            message: The user's response message
+            message: The user's response message (Discord message object)
         """
         try:
             user_id = message.author.id
@@ -515,6 +559,298 @@ async def test_standup(interaction: discord.Interaction, channel: Optional[disco
         logger.error(f"Error sending test standup: {e}")
         await interaction.followup.send(
             f'❌ Error: {str(e)}',
+            ephemeral=True
+        )
+
+
+# Task Management Commands
+class TaskModal(discord.ui.Modal, title='Add New Task'):
+    """Modal form for adding a new task."""
+    
+    description_input = discord.ui.TextInput(
+        label='Description',
+        placeholder='Enter task description...',
+        required=True,
+        max_length=500,
+        style=discord.TextStyle.paragraph
+    )
+    
+    assigned_to_input = discord.ui.TextInput(
+        label='Assigned To',
+        placeholder='Username or Discord mention (e.g., @user or john_doe)',
+        required=True,
+        max_length=100
+    )
+    
+    start_date_input = discord.ui.TextInput(
+        label='Start Date',
+        placeholder='YYYY-MM-DD (e.g., 2024-01-15)',
+        required=True,
+        max_length=10
+    )
+    
+    end_date_input = discord.ui.TextInput(
+        label='End Date',
+        placeholder='YYYY-MM-DD (e.g., 2024-01-20)',
+        required=True,
+        max_length=10
+    )
+    
+    measurable_outcome_input = discord.ui.TextInput(
+        label='Measurable Outcome',
+        placeholder='What should be achieved?',
+        required=True,
+        max_length=500,
+        style=discord.TextStyle.paragraph
+    )
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        """Handle form submission."""
+        if not bot.sheets_manager:
+            await interaction.response.send_message(
+                '❌ Google Sheets integration is not configured. Please set SPREADSHEET_ID in environment variables.',
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # Validate and add task
+            task_number = bot.sheets_manager.add_task(
+                description=self.description_input.value,
+                assigned_to=self.assigned_to_input.value,
+                start_date=self.start_date_input.value,
+                end_date=self.end_date_input.value,
+                measurable_outcome=self.measurable_outcome_input.value
+            )
+            
+            embed = discord.Embed(
+                title="✅ Task Added Successfully",
+                description=f"Task #{task_number} has been added to the Google Sheet.",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Description", value=self.description_input.value, inline=False)
+            embed.add_field(name="Assigned To", value=self.assigned_to_input.value, inline=True)
+            embed.add_field(name="Start Date", value=self.start_date_input.value, inline=True)
+            embed.add_field(name="End Date", value=self.end_date_input.value, inline=True)
+            embed.add_field(name="Measurable Outcome", value=self.measurable_outcome_input.value, inline=False)
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except ValueError as e:
+            await interaction.followup.send(
+                f'❌ Validation Error: {str(e)}',
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error adding task: {e}")
+            await interaction.followup.send(
+                f'❌ Error adding task: {str(e)}',
+                ephemeral=True
+            )
+
+
+@bot.tree.command(name='add_task', description='Add a new task to the Google Sheet')
+async def add_task(interaction: discord.Interaction):
+    """Open a modal form to add a new task."""
+    if not bot.sheets_manager:
+        # Check why it's not configured
+        if not SPREADSHEET_ID:
+            error_msg = (
+                '❌ Google Sheets integration is not configured.\n\n'
+                '💡 **To fix this:**\n'
+                '1. Add `SPREADSHEET_ID=your_spreadsheet_id` to your `.env` file\n'
+                '2. Make sure `credentials.json` is in the project root\n'
+                '3. Restart the bot\n\n'
+                '📖 See `GOOGLE_SHEETS_SETUP.md` for detailed setup instructions.'
+            )
+        else:
+            error_msg = (
+                '❌ Google Sheets integration failed to initialize.\n\n'
+                '💡 **Possible issues:**\n'
+                '1. `credentials.json` file not found or invalid\n'
+                '2. Spreadsheet not shared with service account\n'
+                '3. Invalid SPREADSHEET_ID\n\n'
+                '📋 Check bot logs for detailed error messages.\n'
+                '📖 See `GOOGLE_SHEETS_SETUP.md` for setup instructions.'
+            )
+        await interaction.response.send_message(error_msg, ephemeral=True)
+        return
+    
+    await interaction.response.send_modal(TaskModal())
+
+
+@bot.tree.command(name='view_tasks', description='View all tasks or filter by assigned user')
+@app_commands.describe(user='Optional: Filter by username or Discord mention')
+async def view_tasks(interaction: discord.Interaction, user: Optional[str] = None):
+    """View tasks, optionally filtered by user."""
+    if not bot.sheets_manager:
+        await interaction.response.send_message(
+            '❌ Google Sheets integration is not configured. Please set SPREADSHEET_ID in your `.env` file.',
+            ephemeral=True
+        )
+        return
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        
+        # Get tasks
+        tasks = bot.sheets_manager.get_tasks(assigned_to=user)
+        
+        if not tasks:
+            await interaction.followup.send(
+                f'📭 No tasks found{" for " + user if user else ""}.',
+                ephemeral=True
+            )
+            return
+        
+        # Create embed with tasks
+        embed = discord.Embed(
+            title=f"📋 Tasks{f' for {user}' if user else ''}",
+            description=f"Found {len(tasks)} task(s)",
+            color=discord.Color.blue()
+        )
+        
+        # Add tasks (limit to 10 for embed field limit)
+        for task in tasks[:10]:
+            status = "✅ Complete" if task.get("actual_outcome") else "⏳ In Progress"
+            task_info = (
+                f"**Description:** {task.get('description', 'N/A')}\n"
+                f"**Assigned:** {task.get('assigned_to', 'N/A')}\n"
+                f"**Start:** {task.get('start_date', 'N/A')}\n"
+                f"**End:** {task.get('end_date', 'N/A')}\n"
+                f"**Status:** {status}"
+            )
+            
+            embed.add_field(
+                name=f"Task #{task.get('number', 'N/A')}",
+                value=task_info,
+                inline=False
+            )
+        
+        if len(tasks) > 10:
+            embed.set_footer(text=f"Showing 10 of {len(tasks)} tasks. Use filters to narrow results.")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        logger.error(f"Error viewing tasks: {e}")
+        await interaction.followup.send(
+            f'❌ Error retrieving tasks: {str(e)}',
+            ephemeral=True
+        )
+
+
+@bot.tree.command(name='my_tasks', description='Show tasks assigned to you')
+async def my_tasks(interaction: discord.Interaction):
+    """Show tasks assigned to the command user."""
+    if not bot.sheets_manager:
+        await interaction.response.send_message(
+            '❌ Google Sheets integration is not configured. Please set SPREADSHEET_ID in your `.env` file.',
+            ephemeral=True
+        )
+        return
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        
+        # Get user's tasks (try username and mention)
+        user_identifier = interaction.user.name
+        tasks = bot.sheets_manager.get_user_tasks(user_identifier)
+        
+        # If no tasks found, try with mention
+        if not tasks:
+            tasks = bot.sheets_manager.get_user_tasks(str(interaction.user.mention))
+        
+        # If still no tasks, try display name
+        if not tasks:
+            tasks = bot.sheets_manager.get_user_tasks(interaction.user.display_name)
+        
+        if not tasks:
+            await interaction.followup.send(
+                f'📭 No tasks found assigned to you.\n\n'
+                f'💡 Make sure tasks are assigned using your username or Discord mention.',
+                ephemeral=True
+            )
+            return
+        
+        # Create embed
+        embed = discord.Embed(
+            title=f"📋 Your Tasks",
+            description=f"You have {len(tasks)} task(s)",
+            color=discord.Color.blue()
+        )
+        
+        for task in tasks[:10]:
+            status = "✅ Complete" if task.get("actual_outcome") else "⏳ In Progress"
+            task_info = (
+                f"**Description:** {task.get('description', 'N/A')}\n"
+                f"**Start:** {task.get('start_date', 'N/A')}\n"
+                f"**End:** {task.get('end_date', 'N/A')}\n"
+                f"**Status:** {status}"
+            )
+            
+            if task.get("actual_outcome"):
+                task_info += f"\n**Outcome:** {task.get('actual_outcome')}"
+            
+            embed.add_field(
+                name=f"Task #{task.get('number', 'N/A')}",
+                value=task_info,
+                inline=False
+            )
+        
+        if len(tasks) > 10:
+            embed.set_footer(text=f"Showing 10 of {len(tasks)} tasks.")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        logger.error(f"Error viewing user tasks: {e}")
+        await interaction.followup.send(
+            f'❌ Error retrieving your tasks: {str(e)}',
+            ephemeral=True
+        )
+
+
+@bot.tree.command(name='complete_task', description='Mark a task as complete with an outcome')
+@app_commands.describe(
+    task_number='The task number to complete',
+    outcome='The actual outcome of the task'
+)
+async def complete_task(interaction: discord.Interaction, task_number: int, outcome: str):
+    """Mark a task as complete with an actual outcome."""
+    if not bot.sheets_manager:
+        await interaction.response.send_message(
+            '❌ Google Sheets integration is not configured. Please set SPREADSHEET_ID in your `.env` file.',
+            ephemeral=True
+        )
+        return
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        
+        # Update task outcome
+        success = bot.sheets_manager.update_task_outcome(task_number, outcome)
+        
+        if success:
+            embed = discord.Embed(
+                title="✅ Task Completed",
+                description=f"Task #{task_number} has been marked as complete.",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Outcome", value=outcome, inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.followup.send(
+                f'❌ Task #{task_number} not found.',
+                ephemeral=True
+            )
+            
+    except Exception as e:
+        logger.error(f"Error completing task: {e}")
+        await interaction.followup.send(
+            f'❌ Error completing task: {str(e)}',
             ephemeral=True
         )
 
