@@ -98,6 +98,14 @@ class StandupBot(commands.Bot):
         """Called when the bot is ready."""
         logger.info(f'{self.user} has logged in')
         logger.info(f'Bot is in {len(self.guilds)} guild(s)')
+        
+        # Set bot status/activity
+        activity = discord.Activity(
+            type=discord.ActivityType.watching,
+            name="daily standups"
+        )
+        await self.change_presence(activity=activity, status=discord.Status.online)
+        logger.info('Bot status set to "Watching daily standups"')
     
     async def on_message(self, message: discord.Message):
         """Handle incoming messages."""
