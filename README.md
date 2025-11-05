@@ -187,21 +187,31 @@ The bot should now be running and will send standup messages at the configured t
    # If using Google Sheets integration:
    # heroku config:set SPREADSHEET_ID=your_spreadsheet_id
    # heroku config:set GOOGLE_SHEETS_HEADER_ROW=6
-   # Note: You'll need to upload credentials.json separately (see below)
+   
+   # For credentials, encode your credentials.json to base64 and set it:
+   # macOS: base64 -i credentials.json  # Copy the output
+   # Linux: base64 credentials.json  # Copy the output
+   # heroku config:set GOOGLE_CREDENTIALS_BASE64="<paste_base64_string>"
    ```
    
-   **Important:** For Google Sheets integration, you'll need to upload your `credentials.json` file to Heroku:
+   **Important:** For Google Sheets integration, see [HEROKU_CREDENTIALS_SETUP.md](HEROKU_CREDENTIALS_SETUP.md) for detailed instructions on setting up credentials on Heroku.
+   
+   **Quick Setup:**
    ```bash
-   # Upload credentials.json to Heroku (one-time setup)
-   # Option 1: Use Heroku Config Vars (recommended for production)
-   # Store the JSON content as a config var and write it to the file at runtime
+   # 1. Encode your credentials.json file to base64
+   # macOS:
+   base64 -i credentials.json > temp_base64.txt
+   # Linux:
+   # base64 credentials.json > temp_base64.txt
    
-   # Option 2: Add credentials.json to a secure location
-   # You can use Heroku Scheduler or a buildpack to manage this
+   # 2. Copy the entire base64 string from temp_base64.txt and set it:
+   heroku config:set GOOGLE_CREDENTIALS_BASE64="<paste_entire_base64_string_here>"
    
-   # For now, the simplest approach is to encode the JSON as base64
-   # and store it in a config var, then decode it at runtime
+   # 3. Clean up
+   rm temp_base64.txt
    ```
+   
+   The bot will automatically decode and use the credentials at runtime.
 
 5. **Deploy to Heroku**:
    ```bash
@@ -230,10 +240,10 @@ The bot should now be running and will send standup messages at the configured t
   - For now, the bot will work but data may be lost on restarts
   
 - **Google Sheets Credentials**: If using Google Sheets integration:
-  - The `credentials.json` file needs to be available on Heroku
-  - Store it securely (e.g., as a base64-encoded config var, or use Heroku Scheduler)
+  - Store credentials as base64-encoded config var: `GOOGLE_CREDENTIALS_BASE64`
+  - The bot automatically decodes and writes the file at runtime
+  - See [HEROKU_CREDENTIALS_SETUP.md](HEROKU_CREDENTIALS_SETUP.md) for detailed instructions
   - Ensure the service account email has access to your spreadsheet
-  - Set `GOOGLE_CREDENTIALS_PATH` if the file is in a non-standard location
   
 - **Dyno Types**: 
   - Use **Standard** or **Eco** dyno (Eco dynos sleep after 30 minutes of inactivity, which is fine for a bot that runs scheduled tasks)

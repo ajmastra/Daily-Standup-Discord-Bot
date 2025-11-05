@@ -96,9 +96,31 @@ class StandupBot(commands.Bot):
             try:
                 # Get header row from env, default to 6
                 header_row = int(os.getenv('GOOGLE_SHEETS_HEADER_ROW', '6'))
+                
+                # Handle credentials: Check for base64 encoded credentials (for Heroku) or file path
+                credentials_path = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
+                google_credentials_base64 = os.getenv('GOOGLE_CREDENTIALS_BASE64')
+                
+                # If base64 credentials are provided (Heroku), decode and write to file
+                if google_credentials_base64:
+                    import base64
+                    import json
+                    try:
+                        # Decode base64 credentials
+                        credentials_json = base64.b64decode(google_credentials_base64).decode('utf-8')
+                        # Validate it's valid JSON
+                        json.loads(credentials_json)
+                        # Write to file
+                        with open(credentials_path, 'w') as f:
+                            f.write(credentials_json)
+                        logger.info(f"Credentials decoded from GOOGLE_CREDENTIALS_BASE64 and written to {credentials_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to decode base64 credentials: {e}")
+                        raise
+                
                 self.sheets_manager = GoogleSheetsManager(
                     spreadsheet_id=SPREADSHEET_ID,
-                    credentials_path=os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json'),
+                    credentials_path=credentials_path,
                     header_row=header_row
                 )
                 logger.info(f"Google Sheets Manager initialized successfully (headers in row {header_row})")
