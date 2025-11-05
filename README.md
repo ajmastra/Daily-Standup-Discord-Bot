@@ -232,7 +232,7 @@ The bot should now be running and will send standup messages at the configured t
 
 ### Important Notes for Heroku
 
-- **Procfile**: The `Procfile` uses `uv run python main.py` to ensure dependencies are properly installed. Make sure `uv` is available in your Heroku environment (it should be installed via `pyproject.toml`).
+- **Procfile**: The `Procfile` uses `python main.py`. Heroku will automatically detect Python and install dependencies from `requirements.txt` during the build process.
 
 - **Database Persistence**: Heroku's filesystem is ephemeral. The SQLite database will be reset on each dyno restart. For production, consider:
   - Using Heroku Postgres (free tier available) and modifying the database layer
