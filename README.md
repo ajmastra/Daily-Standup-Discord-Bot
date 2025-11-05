@@ -80,7 +80,6 @@ pip install uv
 `uv` will automatically create and manage a virtual environment for you:
 
 ```bash
-cd bot
 uv sync
 ```
 
@@ -94,9 +93,8 @@ This will:
 
 ### 6. Configure Environment Variables
 
-1. Create a `.env` file in the `bot/` directory:
+1. Create a `.env` file in the project root:
    ```bash
-   cd bot
    touch .env
    ```
 
@@ -127,14 +125,12 @@ This will:
 Using `uv` to run the bot (automatically uses the virtual environment):
 
 ```bash
-cd bot
 uv run python main.py
 ```
 
 Or activate the virtual environment manually:
 
 ```bash
-cd bot
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 python main.py
 ```
@@ -151,7 +147,9 @@ The bot supports the following slash commands:
 - `/set_time <hour> <minute>` - Change the daily message time (24-hour format)
 - `/view_commitments` - View all pending commitments for today
 - `/skip_today` - Skip today's standup (feature in development)
-- `/test_standup` - Send a test standup message (admin only)
+- `/test_standup` - Send a test standup message immediately
+- `/schedule_test_standup <minutes>` - Schedule a test standup message X minutes from now (for testing)
+- `/test_follow_ups` - Test follow-up messages for commitments (simulates next day)
 
 ### How It Works
 
@@ -170,7 +168,7 @@ The bot supports the following slash commands:
 ## File Structure
 
 ```
-bot/
+daily-standup-discord-bot/
 ├── main.py              # Bot initialization and event handlers
 ├── scheduler.py         # Scheduling logic for daily messages
 ├── message_parser.py    # Parse and extract commitments from messages
@@ -180,7 +178,9 @@ bot/
 ├── requirements.txt     # Python dependencies (backup, pyproject.toml is primary)
 ├── .env                 # Environment variables (create this yourself)
 ├── .venv/               # Virtual environment (created automatically by uv)
-└── standup_bot.db       # SQLite database (created automatically)
+├── standup_bot.db       # SQLite database (created automatically)
+├── bot.log              # Bot log file
+└── README.md            # This file
 ```
 
 ## Configuration
@@ -246,7 +246,7 @@ The bot uses SQLite with the following tables:
 
 The bot logs to both:
 - Console output
-- `bot.log` file
+- `bot.log` file (in the project root)
 
 Log levels include INFO, WARNING, and ERROR messages.
 
@@ -264,5 +264,3 @@ For issues or questions:
 1. Check the troubleshooting section above
 2. Review the bot logs for error messages
 3. Open an issue on the project repository
-
-pip
