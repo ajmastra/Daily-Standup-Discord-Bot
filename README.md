@@ -11,6 +11,7 @@ A Python Discord bot that automates daily standup meetings by sending prompts at
 - **Persistent Storage**: Uses SQLite database to save commitments between bot restarts
 - **Slash Commands**: Easy-to-use commands for configuration and management
 - **Optional OpenAI Integration**: Uses OpenAI API for intelligent message parsing (falls back to pattern matching if not available)
+- **Google Sheets Task Management** (Optional): Seamlessly integrates with Google Sheets for task tracking, assignment, and completion tracking
 
 ## Prerequisites
 
@@ -18,6 +19,7 @@ A Python Discord bot that automates daily standup meetings by sending prompts at
 - [uv](https://github.com/astral-sh/uv) package manager (install with: `curl -LsSf https://astral.sh/uv/install.sh | sh` or `pip install uv`)
 - A Discord account and bot token
 - (Optional) OpenAI API key for intelligent parsing
+- (Optional) Google Cloud account and service account credentials for task management features
 
 ## Setup Instructions
 
@@ -283,26 +285,108 @@ The bot supports the following slash commands:
 
 ### Task Management Commands (Google Sheets Integration)
 
-- `/add_task` - Add a new task via interactive form (opens modal)
-- `/view_tasks [user]` - View all tasks, or filter by assigned user
-- `/my_tasks` - Show tasks assigned to you
-- `/complete_task <number> <outcome>` - Mark a task as complete with an outcome
+The bot includes a powerful task management system that integrates directly with Google Sheets, allowing you to track tasks, assignments, and outcomes all from Discord.
 
-**Note:** Task management commands require Google Sheets integration. See [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md) for setup instructions.
+**Available Commands:**
+
+- **`/add_task`** - Add a new task via an interactive modal form
+  - Opens a Discord modal with fields for:
+    - **Description**: Detailed task description (supports multi-line text)
+    - **Assigned To**: Username or Discord mention (e.g., `@user` or `john_doe`)
+    - **Start Date**: Task start date in `YYYY-MM-DD` format
+    - **End Date**: Task end date in `YYYY-MM-DD` format
+    - **Measurable Outcome**: What should be achieved (supports multi-line text)
+  - Tasks are automatically assigned a unique Task ID
+  - Description column is automatically merged across multiple columns for better formatting
+  - Sends a confirmation embed with task details
+
+- **`/view_tasks [user]`** - View all tasks or filter by assigned user
+  - Shows up to 10 most recent tasks (newest first)
+  - Filter by username or Discord mention
+  - Displays task status (Complete or In Progress)
+  - Shows task description, assignee, dates, and outcomes
+
+- **`/my_tasks`** - Show tasks assigned to you
+  - Automatically detects your username, mention, or display name
+  - Shows all your tasks with full details
+  - Includes completion status and outcomes
+
+- **`/complete_task <number> <outcome>`** - Mark a task as complete with an outcome
+  - Updates the "Actual Outcome" column in Google Sheets
+  - Records what was actually achieved
+  - Sends a confirmation message
+
+**Features:**
+
+✅ **Automatic Task Numbering**: Tasks are assigned unique, auto-incrementing IDs  
+✅ **Smart Merging**: Description column automatically merges cells for better formatting  
+✅ **Recent Tasks First**: Tasks are displayed with newest first for better UX  
+✅ **Flexible Filtering**: Filter tasks by username, mention, or partial match  
+✅ **Rich Embeds**: All responses use Discord embeds for better readability  
+✅ **Input Validation**: Date validation and format checking  
+✅ **Error Handling**: Clear error messages if something goes wrong  
+
+**Setup Required:**
+
+Task management commands require Google Sheets integration. See [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md) for detailed setup instructions.
+
+**Sheet Format:**
+
+Tasks are stored in a Google Sheet with the following columns:
+- **Task ID**: Auto-incremented unique identifier
+- **Status**: Task status (can be set manually in the sheet)
+- **Description**: Task description (merged across columns C-F)
+- **Assigned to**: Username or Discord mention
+- **Start Date**: Task start date
+- **End Date**: Task end date
+- **Measurable Outcome**: Expected outcome
+- **Actual Outcome**: What was actually achieved (set via `/complete_task`)
 
 ### How It Works
 
+#### Daily Standup Workflow
+
 1. **Daily Standup**: At the configured time (default 5:00 PM), the bot sends a message asking:
    - "What did you work on today for the project? What will you work on tomorrow?"
+   - Mentions the `@Developer` role (if available) to notify the team
 
 2. **Response Tracking**: Users reply to the standup message. The bot:
    - Monitors responses for 2-3 hours after the standup message
+   - Accepts both replies to the standup message and direct messages in the channel
    - Parses the message to extract today's work and tomorrow's commitment
    - Saves the information to the database
+   - Sends a confirmation message with what was recorded
 
 3. **Follow-up Messages**: The next day, before the new standup (at 4:30 PM by default), the bot:
    - Sends a message to each user asking if they completed their commitment
+   - Uses rich embeds for better visual appeal
    - Format: "Hey @user, yesterday you said you'd [commitment]. Did you get this done?"
+
+#### Task Management Workflow
+
+1. **Adding Tasks**: Use `/add_task` to open an interactive modal form
+   - Fill in all required fields (description, assignee, dates, outcome)
+   - Task is immediately added to Google Sheets with auto-incremented ID
+   - Description cells are automatically merged for formatting
+   - Confirmation message shows all task details
+
+2. **Viewing Tasks**: Use `/view_tasks` or `/my_tasks` to see task lists
+   - Tasks are displayed newest first
+   - Shows status (Complete or In Progress)
+   - Includes all relevant details in an organized embed
+
+3. **Completing Tasks**: Use `/complete_task` when a task is finished
+   - Updates the "Actual Outcome" column in Google Sheets
+   - Records what was actually achieved
+   - Task remains in the sheet for historical tracking
+
+**Integration Benefits:**
+
+- **Unified Workflow**: Manage standups and tasks all from Discord
+- **Persistent Storage**: Tasks are stored in Google Sheets (accessible outside Discord)
+- **Team Visibility**: Everyone can view tasks and assignments
+- **Accountability**: Track commitments from standups and task outcomes
+- **Historical Tracking**: All tasks and outcomes are preserved in the sheet
 
 ## File Structure
 
@@ -453,4 +537,38 @@ For issues or questions:
 1. Check the troubleshooting section above
 2. Review the bot logs for error messages
 3. Check the [Google Sheets Setup Guide](GOOGLE_SHEETS_SETUP.md) if using task management
-4. Open an issue on the project repository
+4. Check the [Heroku Credentials Setup Guide](HEROKU_CREDENTIALS_SETUP.md) if deploying to Heroku
+5. Open an issue on the project repository
+
+## Google Sheets Integration
+
+The bot includes comprehensive task management features that integrate with Google Sheets. This allows you to:
+
+- **Track Tasks**: Create, view, and complete tasks directly from Discord
+- **Assign Work**: Assign tasks to team members using usernames or Discord mentions
+- **Monitor Progress**: View task lists, filter by assignee, and track completion
+- **Record Outcomes**: Document what was actually achieved vs. what was planned
+- **Persistent Storage**: All data is stored in Google Sheets (accessible outside Discord)
+- **Historical Tracking**: Keep a complete record of all tasks and outcomes
+
+**Key Benefits:**
+
+- **No Database Setup**: Uses Google Sheets instead of a separate database
+- **Easy Access**: View and edit tasks directly in Google Sheets
+- **Team Collaboration**: Multiple team members can view tasks simultaneously
+- **Export & Analysis**: Export data from Google Sheets for reporting and analysis
+- **Automatic Formatting**: Description columns are automatically merged for readability
+
+**Setup:**
+
+See [GOOGLE_SHEETS_SETUP.md](GOOGLE_SHEETS_SETUP.md) for detailed setup instructions. The setup process includes:
+1. Creating a Google Cloud project
+2. Enabling Google Sheets and Drive APIs
+3. Creating a service account
+4. Downloading credentials
+5. Setting up your spreadsheet
+6. Configuring the bot
+
+**For Heroku Deployment:**
+
+See [HEROKU_CREDENTIALS_SETUP.md](HEROKU_CREDENTIALS_SETUP.md) for instructions on securely storing Google credentials on Heroku.
